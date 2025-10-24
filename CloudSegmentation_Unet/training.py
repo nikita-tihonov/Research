@@ -22,9 +22,11 @@ import segmentation_models_pytorch as smp
 from tqdm import tqdm
 from pathlib import Path
 from PIL import Image
+from skimage.segmentation import find_boundaries
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
+
 
 class CloudDataset(Dataset):
     def __init__(self, r_dir, g_dir, b_dir, nir_dir, gt_dir, pytorch=True):
@@ -48,7 +50,7 @@ class CloudDataset(Dataset):
 
         return len(self.files)
 
-    def open_as_array(self, idx, invert=False, include_nir=False):
+    def open_as_array(self, idx, invert=False):
 
         raw_rgb = np.stack([np.array(Image.open(self.files[idx]['red'])),
                             np.array(Image.open(self.files[idx]['green'])),
@@ -56,16 +58,11 @@ class CloudDataset(Dataset):
                             np.array(Image.open(self.files[idx]['nir'])),
                            ], axis=2)
 
-        # if include_nir:
-            # nir = np.expand_dims(np.array(Image.open(self.files[idx]['nir'])), 2)
-            # raw_rgb = np.concatenate([raw_rgb, nir], axis=2)
-
         if invert:
             raw_rgb = raw_rgb.transpose((2,0,1))
 
         # normalize
         return (raw_rgb / np.iinfo(raw_rgb.dtype).max)
-
 
     def open_mask(self, idx, add_dims=False):
 
@@ -76,7 +73,7 @@ class CloudDataset(Dataset):
 
     def __getitem__(self, idx):
 
-        x = torch.tensor(self.open_as_array(idx, invert=self.pytorch, include_nir=True), dtype=torch.float32)
+        x = torch.tensor(self.open_as_array(idx, invert=self.pytorch), dtype=torch.float32)
         y = torch.tensor(self.open_mask(idx, add_dims=False), dtype=torch.torch.int64)
 
         return x, y
@@ -99,6 +96,7 @@ def pixel_accuracy(pred, target):
     total = target.numel()
     return correct / total
 
+
 def mean_iou(pred, target, num_classes=2, ignore_index=None):
     ious = []
     pred = pred.view(-1)
@@ -119,6 +117,7 @@ def mean_iou(pred, target, num_classes=2, ignore_index=None):
             ious.append(intersection / union)
     return np.nanmean(ious)
 
+
 def dice_coefficient(pred, target, num_classes=2, ignore_index=None):
     dices = []
     pred = pred.view(-1)
@@ -138,6 +137,7 @@ def dice_coefficient(pred, target, num_classes=2, ignore_index=None):
         else:
             dices.append(2.0 * intersection / denom)
     return np.nanmean(dices)
+
 
 def frequency_weighted_iou(pred, target, num_classes=2, ignore_index=None):
     pred = pred.view(-1)
@@ -167,8 +167,8 @@ def frequency_weighted_iou(pred, target, num_classes=2, ignore_index=None):
         return 0.0
     return np.average(ious, weights=freqs)
 
+
 def entropy_score(logits):
-    # logits: (C, H, W) or (B, C, H, W)
     if logits.dim() == 4:
         logits = logits.squeeze(0)  # (C, H, W)
     probs = torch.softmax(logits, dim=0)
@@ -176,11 +176,8 @@ def entropy_score(logits):
     entropy = -(probs * log_probs).sum(dim=0).mean().item()
     return entropy
 
-from skimage.segmentation import find_boundaries
 
 def boundary_f1(pred_mask, gt_mask, dilation=0):
-    # pred_mask, gt_mask: (H, W) numpy arrays with class IDs
-    # Convert to binary boundary maps
     pred_boundary = find_boundaries(pred_mask, mode='thick')
     gt_boundary = find_boundaries(gt_mask, mode='thick')
     
@@ -198,6 +195,7 @@ def boundary_f1(pred_mask, gt_mask, dilation=0):
     recall = tp / (tp + fn + 1e-8)
     bf1 = 2 * precision * recall / (precision + recall + 1e-8)
     return bf1
+
 
 def contour_accuracy(pred_mask, gt_mask, tolerance=2):
     pred_boundary = find_boundaries(pred_mask, mode='thick')
@@ -238,6 +236,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     avg_acc = total_acc / num_batches
     return avg_loss, avg_acc
 
+
 def validate(model, loader, criterion, device):
     model.eval()
     total_loss = 0.0
@@ -273,13 +272,11 @@ def validate(model, loader, criterion, device):
                 mask = masks[i].cpu()
                 logits = outputs[i].cpu()
 
-                # Основные метрики
                 metrics['miou'].append(mean_iou(pred, mask, num_classes=2))
                 metrics['dice'].append(dice_coefficient(pred, mask, num_classes=2))
                 metrics['fw_iou'].append(frequency_weighted_iou(pred, mask, num_classes=2))
                 metrics['entropy'].append(entropy_score(logits))
 
-                # Границы (требуют numpy)
                 pred_np = pred.numpy().astype(np.int32)
                 target_np = mask.numpy().astype(np.int32)
                 metrics['bf1'].append(boundary_f1(pred_np, target_np, dilation=2))
@@ -374,6 +371,7 @@ def visualize_training(history, save_path):
 
 # ----------------------------------------------------------------------------------------
 # Training
+
 
 base_path = Path('/root/.cache/kagglehub/datasets/sorour/38cloud-cloud-segmentation-in-satellite-images/versions/4/38-Cloud_training')
 data = CloudDataset(base_path/'train_red',

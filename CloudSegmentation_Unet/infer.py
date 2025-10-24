@@ -21,19 +21,6 @@ model.load_state_dict(torch.load("weights/unet_cloud_25epochs.pth", map_location
 model.eval()
 print("Модель загружена и готова к инференсу")
 
-def open_as_array(idx, invert=False):
-
-        raw_rgb = np.stack([np.array(Image.open(self.files[idx]['red'])),
-                            np.array(Image.open(self.files[idx]['green'])),
-                            np.array(Image.open(self.files[idx]['blue'])),
-                            np.array(Image.open(self.files[idx]['nir']))
-                           ], axis=2)
-
-        if invert:
-            raw_rgb = raw_rgb.transpose((2,0,1))
-
-        # normalize
-        return (raw_rgb / np.iinfo(raw_rgb.dtype).max)
 
 def predict_single_image(model, r_dir, g_dir, b_dir, nir_dir, device, invert=True):
 
@@ -42,13 +29,11 @@ def predict_single_image(model, r_dir, g_dir, b_dir, nir_dir, device, invert=Tru
     image_b = np.array(Image.open(b_dir))
     image_nir = np.array(Image.open(nir_dir))
 
-
     raw_rgbi = np.stack([image_r,
                         image_g,
                         image_b,
                         image_nir
                         ], axis=2)
-
 
     if invert:
         raw_rgbi = raw_rgbi.transpose((2,0,1))
@@ -62,11 +47,8 @@ def predict_single_image(model, r_dir, g_dir, b_dir, nir_dir, device, invert=Tru
         output = model(input_tensor)
         pred_mask = torch.argmax(output, dim=1).squeeze().cpu().numpy()
 
-    # pred_mask = output.squeeze().cpu().numpy()
-    # pred_mask = (pred_mask > threshold).astype(np.uint8)
-    # pred_mask = cv2.resize(pred_mask, (original_size[1], original_size[0]), interpolation=cv2.INTER_NEAREST)
-
     return image_r, image_g, image_b, image_nir, pred_mask
+
 
 def visualize_prediction(r_img, g_img, b_img, nir_img, predicted_mask, save_path=None):
 
@@ -102,6 +84,7 @@ def visualize_prediction(r_img, g_img, b_img, nir_img, predicted_mask, save_path
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Результат сохранён: {save_path}")
     plt.show()
+
 
 base_path = Path('/root/.cache/kagglehub/datasets/sorour/38cloud-cloud-segmentation-in-satellite-images/versions/4/38-Cloud_test')
 
